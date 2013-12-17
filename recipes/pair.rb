@@ -29,12 +29,16 @@ if node['drbd']['remote_host'].nil?
 end
 
 remote = search(:node, "name:#{node['drbd']['remote_host']}")[0]
+my_master = node['drbd']['master'] ? node.ipaddress : remote.ipaddress
+has_heartbeat = node.attribute?('heartbeat')
 
 template "/etc/drbd.d/#{resource}.res" do
   source "res.erb"
   variables(
     :resource => resource,
-    :remote_ip => remote.ipaddress
+    :remote_ip => remote.ipaddress,
+    :my_master => my_master,
+    :has_heartbeat => has_heartbeat,
     )
   owner "root"
   group "root"
@@ -43,27 +47,27 @@ end
 
 #first pass only, initialize drbd
 execute "drbdadm create-md #{resource}" do
-  subscribes :run, resources(:template => "/etc/drbd.d/#{resource}.res")
-  notifies :restart, resources(:service => "drbd"), :immediate
+  subscribes :run, "template[/etc/drbd.d/#{resource}.res]"
+  notifies :restart, "service[drbd]", :immediately
   only_if do
     cmd = Chef::ShellOut.new("drbd-overview")
     overview = cmd.run_command
     Chef::Log.info overview.stdout
     overview.stdout.include?("drbd not loaded")
   end
-  action :nothing
+  #action :nothing
 end
 
 #claim primary based off of node['drbd']['master']
 execute "drbdadm -- --overwrite-data-of-peer primary all" do
-  subscribes :run, resources(:execute => "drbdadm create-md #{resource}")
+  subscribes :run, "execute[drbdadm create-md #{resource}]"
   only_if { node['drbd']['master'] && !node['drbd']['configured'] }
   action :nothing
 end
 
 #You may now create a filesystem on the device, use it as a raw block device
 execute "mkfs -t #{node['drbd']['fs_type']} #{node['drbd']['dev']}" do
-  subscribes :run, resources(:execute => "drbdadm -- --overwrite-data-of-peer primary all")
+  subscribes :run, "execute[drbdadm -- --overwrite-data-of-peer primary all]"
   only_if { node['drbd']['master'] && !node['drbd']['configured'] }
   action :nothing
 end
@@ -86,6 +90,6 @@ ruby_block "set drbd configured flag" do
   block do
     node.set['drbd']['configured'] = true
   end
-  subscribes :create, resources(:execute => "mkfs -t #{node['drbd']['fs_type']} #{node['drbd']['dev']}")
+  subscribes :create, "execute[mkfs -t #{node['drbd']['fs_type']} #{node['drbd']['dev']}]"
   action :nothing
 end
