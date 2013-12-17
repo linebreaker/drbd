@@ -29,12 +29,16 @@ if node['drbd']['remote_host'].nil?
 end
 
 remote = search(:node, "name:#{node['drbd']['remote_host']}")[0]
+my_master = node['drbd']['master'] ? node.ipaddress : remote.ipaddress
+has_heartbeat = node.attribute?('heartbeat')
 
 template "/etc/drbd.d/#{resource}.res" do
   source "res.erb"
   variables(
     :resource => resource,
-    :remote_ip => remote.ipaddress
+    :remote_ip => remote.ipaddress,
+    :my_master => my_master,
+    :has_heartbeat => has_heartbeat,
     )
   owner "root"
   group "root"
@@ -51,7 +55,7 @@ execute "drbdadm create-md #{resource}" do
     Chef::Log.info overview.stdout
     overview.stdout.include?("drbd not loaded")
   end
-  action :nothing
+  #action :nothing
 end
 
 #claim primary based off of node['drbd']['master']
